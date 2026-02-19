@@ -56,22 +56,19 @@ def get_destination_hype(destination):
 st.set_page_config(page_title="AI Group Trip Planner", page_icon="✈️", layout="centered")
 
 # --- CSS FOR STYLING (UPDATED FOR BETTER READABILITY) ---
+# --- CSS FOR STYLING ---
 st.markdown("""
     <style>
+    /* Expand the main container width */
+    .block-container {
+        max-width: 1000px !important;
+    }
     .stButton>button {
         width: 100%;
         background-color: #FF4B4B;
         color: white;
         border-radius: 8px;
         font-weight: bold;
-    }
-    .place-card {
-        padding: 15px;
-        border-radius: 10px;
-        border-left: 5px solid #FF4B4B;
-        margin-bottom: 15px;
-        /* Using rgba makes it adapt beautifully to both Light and Dark mode */
-        background-color: rgba(128, 128, 128, 0.1); 
     }
     .hype-text {
         font-size: 1.25rem;
@@ -200,7 +197,7 @@ elif page == "Vote on Trip":
                 del st.session_state["destination"]
                 st.rerun()
         
-        # Fetch Members (so we can translate member_id to their real name)
+        # Fetch Members
         members_res = supabase.table("members").select("*").eq("trip_id", trip_id).execute()
         member_map = {m['id']: m['name'] for m in members_res.data}
         
@@ -208,69 +205,54 @@ elif page == "Vote on Trip":
         places_res = supabase.table("places").select("*").eq("trip_id", trip_id).execute()
         places = places_res.data
         
-        # Fetch Votes (to show the live leaderboard)
-        votes_by_place = {}
+        # --- NEW: GLOBAL VOTER TRACKER (Anonymous) ---
+        voted_members = set()
         if places:
             place_ids = [p['id'] for p in places]
-            votes_res = supabase.table("votes").select("*").in_("place_id", place_ids).execute()
-            
-            # Organize the votes into a dictionary: { place_id: ["Raaj", "Simran"] }
-            for pid in place_ids:
-                votes_by_place[pid] = []
-                
+            # Get all votes for these places
+            votes_res = supabase.table("votes").select("member_id").in_("place_id", place_ids).execute()
+            # Find unique members who have voted
             for v in votes_res.data:
-                if v['vote_value'] > 0: # Only count positive votes
-                    voter_name = member_map.get(v['member_id'], "Unknown")
-                    votes_by_place[v['place_id']].append(voter_name)
-
+                voted_members.add(v['member_id'])
+                
+        voter_names = [member_map.get(m_id, "Unknown") for m_id in voted_members]
+        
         if not places:
             st.warning("No places found. Ask the leader to run the Scout!")
         else:
             with st.form("voting_form"):
                 st.subheader("📍 Choose Your Must-Do Activities")
+                
+                # Display the anonymous participation tracker
+                if voter_names:
+                    st.info(f"👥 **{len(voter_names)} people have cast their votes so far:** {', '.join(voter_names)}")
+                else:
+                    st.info("👥 **No one has voted yet. Be the first!**")
+                
+                st.write("---")
                 selected_places = []
                 
                 for place in places:
-                    # Create two columns: 75% for the card, 25% for the vote tally
-                    col_main, col_votes = st.columns([3, 1])
+                    cost_val = place.get('estimated_cost', 1)
+                    cost_display = "Free / Very Cheap" if cost_val == 0 else '$' * cost_val
                     
-                    with col_main:
-                        cost_val = place.get('estimated_cost', 1)
-                        cost_display = "Free / Very Cheap" if cost_val == 0 else '$' * cost_val
+                    rating_val = place.get('rating', 0.0)
+                    rating_display = f"⭐ {rating_val} / 5.0" if rating_val > 0 else "⭐ Rating N/A"
+                    
+                    search_query = urllib.parse.quote_plus(f"{place['name']} {dest}")
+                    google_link = f"https://www.google.com/search?q={search_query}"
+                    
+                    # --- NEW: Native Streamlit Cards ---
+                    with st.container(border=True):
+                        st.markdown(f"### {place['name']}  <span style='font-size: 16px; font-weight: normal; color: gray;'>({place['category']})</span>", unsafe_allow_html=True)
+                        st.write(place['description'])
+                        st.caption(f"**💰 {cost_display} | {rating_display}** &nbsp;&nbsp;•&nbsp;&nbsp; [🔍 See photos & details on Google]({google_link})")
                         
-                        rating_val = place.get('rating', 0.0)
-                        rating_display = f"⭐ {rating_val} / 5.0" if rating_val > 0 else "⭐ Rating N/A"
-                        
-                        search_query = urllib.parse.quote_plus(f"{place['name']} {dest}")
-                        google_link = f"https://www.google.com/search?q={search_query}"
-                        
-                        st.markdown(f"""
-                        <div class="place-card">
-                            <h4 style="margin-bottom: 5px;">{place['name']} <span style="font-size: 14px; font-weight: normal; color: gray;">({place['category']})</span></h4>
-                            <p style="margin-bottom: 10px; line-height: 1.4;">{place['description']}</p>
-                            <p style="margin-bottom: 10px; font-weight: bold;">💰 {cost_display} | {rating_display}</p>
-                            <a href="{google_link}" target="_blank" style="text-decoration: none; color: #1E90FF; font-weight: bold;">🔍 See photos & details on Google</a>
-                        </div>
-                        """, unsafe_allow_html=True)
-                        
-                        # The voting checkbox
-                        if st.checkbox(f"Add {place['name']} to my wishlist", key=place['id']):
+                        # The checkbox is now cleanly grouped inside the box!
+                        if st.checkbox("✅ Add to my wishlist", key=place['id']):
                             selected_places.append(place['id'])
-                    
-                    with col_votes:
-                        # --- NEW: Live Vote Tally UI ---
-                        voters = votes_by_place.get(place['id'], [])
-                        st.markdown(f"<div style='padding-top: 15px;'><b>Current Votes: {len(voters)}</b></div>", unsafe_allow_html=True)
-                        
-                        if voters:
-                            for name in voters:
-                                st.markdown(f"✅ <span style='color: gray; font-style: italic;'>{name}</span>", unsafe_allow_html=True)
-                        else:
-                            st.caption("No votes yet. Be the first!")
-                    
-                    st.write("---") # Spacing line below the row
 
-                # Global Vibe Check
+                st.write("---")
                 st.subheader("✨ What's your overarching vibe?")
                 vibe = st.select_slider("Select your travel style", options=["Extremely Chill", "Balanced", "Non-stop Adventure"])
                 comment = st.text_area("Any specific requests? (e.g., 'No seafood', 'I want to hike')")
@@ -287,14 +269,13 @@ elif page == "Vote on Trip":
                     
                     if vote_inserts:
                         try:
-                            # Use upsert to handle if they resubmit to change votes
                             supabase.table("votes").upsert(vote_inserts).execute()
-                            st.success("🎉 Votes locked in! Click 'Switch User' if someone else needs to vote.")
+                            st.success("🎉 Votes locked in! Click 'Switch User' above if someone else needs to vote.")
                         except Exception as e:
                             st.error(f"Error saving votes: {e}")
                     else:
                         st.warning("You didn't select any places! Don't be boring, pick something!")
-                        
+
 # ==========================================
 # PAGE 3: VIEW FINAL PLAN (THE ARCHITECT)
 # ==========================================
