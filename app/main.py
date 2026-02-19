@@ -42,47 +42,57 @@ page = st.sidebar.radio("Go to", ["Create New Trip", "Vote on Trip", "View Final
 # ==========================================
 if page == "Create New Trip":
     st.title("🌍 Plan a New Group Trip")
-    st.markdown("Use AI to scout the best locations and generate a voting link for your friends.")
-
-    with st.form("create_trip_form"):
-        destination = st.text_input("Where do you want to go?", "Goa")
-        col1, col2 = st.columns(2)
-        with col1:
-            start_date = st.date_input("Start Date", date.today())
-        with col2:
-            end_date = st.date_input("End Date", date.today())
+    
+    # LOCK: If a trip was just created, hide the form and show the ID
+    if "created_trip_id" in st.session_state:
+        st.success("✅ Trip Created & Places Scouted!")
+        st.info("📋 **Copy this Trip ID and share it with your group:**")
+        st.code(st.session_state["created_trip_id"], language="text")
+        st.markdown("They will need this ID to vote on the next tab.")
         
-        budget = st.number_input("Budget per person (USD)", min_value=100, value=500)
-        submitted = st.form_submit_button("🚀 Launch AI Scout")
+        # Give them a way to reset if they actually want a new trip
+        if st.button("Plan a Different Trip"):
+            del st.session_state["created_trip_id"]
+            st.rerun()
+            
+    # Show the form only if a trip hasn't been created yet
+    else:
+        st.markdown("Use AI to scout the best locations and generate a voting link for your friends.")
+        with st.form("create_trip_form"):
+            destination = st.text_input("Where do you want to go?", "Goa")
+            col1, col2 = st.columns(2)
+            with col1:
+                start_date = st.date_input("Start Date", date.today())
+            with col2:
+                end_date = st.date_input("End Date", date.today())
+            
+            budget = st.number_input("Budget per person (USD)", min_value=100, value=500)
+            submitted = st.form_submit_button("🚀 Launch AI Scout")
 
-    if submitted:
-        with st.spinner(f"🤖 AI is scouting top places in {destination}..."):
-            try:
-                # 1. Create Trip in DB
-                trip_data = {
-                    "destination": destination,
-                    "start_date": str(start_date),
-                    "end_date": str(end_date),
-                    "budget_limit": budget,
-                    "status": "VOTING"
-                }
-                response = supabase.table("trips").insert(trip_data).execute()
-                trip_id = response.data[0]['id']
+        if submitted:
+            with st.spinner(f"🤖 AI is scouting top places in {destination}..."):
+                try:
+                    # 1. Create Trip in DB
+                    trip_data = {
+                        "destination": destination,
+                        "start_date": str(start_date),
+                        "end_date": str(end_date),
+                        "budget_limit": budget,
+                        "status": "VOTING"
+                    }
+                    response = supabase.table("trips").insert(trip_data).execute()
+                    trip_id = response.data[0]['id']
 
-                # 2. Run the Scout Agent (This puts places into the DB)
-                # Note: We are using the "Mock" version now, so it will be instant.
-                run_scout_agent(trip_id, destination)
-                
-                st.success("✅ Trip Created & Places Scouted!")
-                st.balloons()
-                
-                # 3. Show the Shareable Code
-                st.info(f"📋 **Copy this Trip ID and share it with your group:**")
-                st.code(trip_id, language="text")
-                st.markdown("They will need this ID to vote on the next tab.")
-                
-            except Exception as e:
-                st.error(f"Error creating trip: {e}")
+                    # 2. Run the Scout Agent
+                    run_scout_agent(trip_id, destination)
+                    
+                    # 3. Lock the state and trigger a UI refresh
+                    st.session_state["created_trip_id"] = trip_id
+                    st.balloons()
+                    st.rerun()
+                    
+                except Exception as e:
+                    st.error(f"Error creating trip: {e}")
 
 # ==========================================
 # PAGE 2: VOTE (MEMBER VIEW)
@@ -96,13 +106,11 @@ elif page == "Vote on Trip":
         member_name = st.text_input("Your Name:")
         
         if st.button("Join Trip") and trip_id_input and member_name:
-            # Check if trip exists
             try:
                 trip_check = supabase.table("trips").select("*").eq("id", trip_id_input).execute()
                 if not trip_check.data:
                     st.error("Trip ID not found!")
                 else:
-                    # Create Member
                     member_data = {"trip_id": trip_id_input, "name": member_name}
                     member_res = supabase.table("members").insert(member_data).execute()
                     
@@ -116,7 +124,17 @@ elif page == "Vote on Trip":
     # 2. Voting Interface
     else:
         trip_id = st.session_state["current_trip_id"]
-        st.write(f"Welcome, **{st.session_state['member_name']}**! Select the places you'd love to visit.")
+        
+        # --- NEW: Quick Switch User Button (No reload required!) ---
+        col_text, col_btn = st.columns([3, 1])
+        with col_text:
+            st.write(f"Welcome, **{st.session_state['member_name']}**! Select the places you'd love to visit.")
+        with col_btn:
+            if st.button("🔄 Switch User"):
+                del st.session_state["current_trip_id"]
+                del st.session_state["current_member_id"]
+                del st.session_state["member_name"]
+                st.rerun()
         
         # Fetch Places from DB
         places_res = supabase.table("places").select("*").eq("trip_id", trip_id).execute()
@@ -127,12 +145,9 @@ elif page == "Vote on Trip":
         else:
             with st.form("voting_form"):
                 st.subheader("📍 Places to Visit")
-                
-                # Store user choices
                 selected_places = []
                 
                 for place in places:
-                    # Display a nice card for each place
                     st.markdown(f"""
                     <div class="place-card">
                         <b>{place['name']}</b> ({place['category']})<br>
@@ -141,41 +156,33 @@ elif page == "Vote on Trip":
                     </div>
                     """, unsafe_allow_html=True)
                     
-                    # The Checkbox
                     if st.checkbox(f"Vote for {place['name']}", key=place['id']):
                         selected_places.append(place['id'])
                     
                     st.write("---")
 
-                # Global Vibe Check
                 st.subheader("✨ What's your vibe for this trip?")
-                vibe = st.select_slider(
-                    "Balance",
-                    options=["Chill / Relaxing", "Balanced", "Adventure / Party"]
-                )
-                
+                vibe = st.select_slider("Balance", options=["Chill / Relaxing", "Balanced", "Adventure / Party"])
                 comment = st.text_area("Any specific requests? (e.g., 'No seafood', 'I want to hike')")
 
                 if st.form_submit_button("Submit Votes"):
-                    # Save votes to DB
                     vote_inserts = []
                     for pid in selected_places:
                         vote_inserts.append({
                             "place_id": pid,
                             "member_id": st.session_state["current_member_id"],
-                            "vote_value": 1, # Simple 'Like'
+                            "vote_value": 1, 
                             "comment": comment
                         })
                     
                     if vote_inserts:
                         try:
                             supabase.table("votes").insert(vote_inserts).execute()
-                            st.success("🎉 Votes Saved! You can close this tab.")
+                            st.success("🎉 Votes Saved! Click 'Switch User' above to let the next person vote.")
                         except Exception as e:
                             st.error(f"Error saving votes: {e}")
                     else:
                         st.warning("You didn't select any places!")
-
 # ==========================================
 # PAGE 3: VIEW FINAL PLAN (THE ARCHITECT)
 # ==========================================
