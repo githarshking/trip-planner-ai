@@ -79,7 +79,8 @@ def curate_places(state: ScoutState) -> ScoutState:
     2. Categorize them exactly as: 'Attraction', 'Restaurant', 'Activity', or 'Relaxation'.
     3. Estimate cost (0 = Free, 1 = Cheap, 2 = Expensive, 3 = Luxury).
     4. Provide a short, exciting description (1 sentence).
-    5. Return ONLY valid JSON. Do not write markdown.
+    5. RATING: If the raw data does not include a star rating, use your internal knowledge to estimate its real-world Google Maps rating (e.g., 4.4, 4.7). Do not use 0.
+    6. Return ONLY valid JSON. Do not write markdown.
     
     Raw Data:
     {raw_data_str}
