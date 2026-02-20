@@ -22,7 +22,7 @@ supabase = get_db()
 def get_destination_hype(destination):
     """Uses AI to generate a glorifying description and top experiences for the destination."""
     try:
-        llm = ChatGoogleGenerativeAI(model="gemini-2.0-flash", google_api_key=os.getenv("GOOGLE_API_KEY"), temperature=0.7)
+        llm = ChatGoogleGenerativeAI(model="gemini-2.5-flash", google_api_key=os.getenv("GOOGLE_API_KEY"), temperature=0.7)
         prompt = f"""
         You are a hype-man travel guide. For the destination '{destination}':
         1. Write a 2-sentence exciting, glorifying description to hype up travelers.
@@ -106,14 +106,14 @@ if page == "Create New Trip":
     else:
         st.markdown("Use AI to scout the best locations and generate a voting link for your friends.")
         with st.form("create_trip_form"):
-            destination = st.text_input("Where do you want to go?", "Goa")
+            destination = st.text_input("Where do you want to go?", "e.g., Paris, Tokyo, New York").strip()
             col1, col2 = st.columns(2)
             with col1:
                 start_date = st.date_input("Start Date", date.today())
             with col2:
                 end_date = st.date_input("End Date", date.today())
             
-            budget = st.number_input("Budget per person (USD)", min_value=100, value=500)
+            budget = st.number_input("Budget per person (INR ₹)", min_value=1000, value=15000, step=1000)
             submitted = st.form_submit_button("🚀 Launch AI Scout")
 
         if submitted:
@@ -234,7 +234,7 @@ elif page == "Vote on Trip":
                 
                 for place in places:
                     cost_val = place.get('estimated_cost', 1)
-                    cost_display = "Free / Very Cheap" if cost_val == 0 else '$' * cost_val
+                    cost_display = "Free / Very Cheap" if cost_val == 0 else '₹' * cost_val
                     
                     rating_val = place.get('rating', 0.0)
                     rating_display = f"⭐ {rating_val} / 5.0" if rating_val > 0 else "⭐ Rating N/A"
@@ -287,19 +287,54 @@ elif page == "View Final Plan":
     if st.button("Generate / View Plan"):
         if trip_id_input:
             with st.spinner("🧠 The Architect is resolving conflicts and building the schedule..."):
-                plan = generate_itinerary(trip_id_input)
                 
-                if "error" in plan:
-                    st.error(plan["error"])
+                try:
+                    trip_check = supabase.table("trips").select("destination").eq("id", trip_id_input).execute()
+                    dest = trip_check.data[0]['destination'] if trip_check.data else ""
+                except:
+                    dest = ""
+
+                # Run the Architect Agent
+                architect_data = generate_itinerary(trip_id_input)
+                
+                if "error" in architect_data:
+                    st.error(architect_data["error"])
                 else:
                     st.success("✨ Itinerary Generated!")
                     
-                    for day in plan:
+                    # --- NEW: DISPLAY HOTELS ---
+                    st.markdown("### 🏨 Your Accommodation Options")
+                    st.caption("We crunched your daily budget. Here are the best places to stay:")
+                    
+                    cols = st.columns(3)
+                    for i, hotel in enumerate(architect_data['hotels']):
+                        with cols[i]:
+                            st.info(f"**{hotel['name']}**\n\nType: {hotel['type']}\n\nPrice: ₹{int(hotel['price'])}/night")
+                            
+                    st.divider()
+                    
+                    # --- DISPLAY THE TIMELINE ---
+                    for day in architect_data['plan']:
                         st.subheader(f"Day {day['day']}")
                         for activity in day['activities']:
-                            st.markdown(f"**{activity['time']}** — {activity['activity']}")
-                            st.caption(f"_{activity.get('notes', '')}_")
+                            
+                            clean_name = activity['activity'].replace("Visit ", "").replace("Lunch at ", "").replace("Dinner at ", "")
+                            search_query = urllib.parse.quote_plus(f"{clean_name} {dest}")
+                            google_link = f"https://www.google.com/search?q={search_query}"
+                            
+                            st.markdown(f"**{activity['time']}** — <a href='{google_link}' target='_blank' style='text-decoration: none; color: #FF4B4B; font-weight: bold;'>{activity['activity']} 🔍</a>", unsafe_allow_html=True)
+                            
+                            if activity.get('notes'):
+                                st.caption(f"_{activity['notes']}_")
+                                
                         st.divider()
                         
-                    st.markdown("### 🗺️ Navigate")
-                    st.info("Click here to open today's route on Google Maps (Coming soon!)")
+                    # --- NEW: GOOGLE MAPS LINK ---
+                    st.markdown("### 🗺️ Master Navigation")
+                    st.markdown("We have solved the Traveling Salesperson Problem to give you the most optimized driving route.")
+                    
+                    if architect_data['map_url']:
+                        # Streamlit's native Link Button looks fantastic for this
+                        st.link_button("📍 Open Full Optimized Route in Google Maps", architect_data['map_url'], type="primary")
+                    else:
+                        st.warning("Not enough map data to generate a route.")
