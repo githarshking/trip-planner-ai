@@ -6,6 +6,7 @@ from langchain_core.messages import SystemMessage, HumanMessage
 from tavily import TavilyClient
 from supabase import create_client
 from dotenv import load_dotenv
+from datetime import datetime
 
 # Load environment variables
 load_dotenv()
@@ -58,29 +59,62 @@ def search_places(state: ScoutState) -> ScoutState:
 # ... keep imports and search_places function as is ...
 
 # --- REPLACE ONLY THIS FUNCTION ---
-def curate_places(state: ScoutState) -> ScoutState:
-    print("🧠 Curating and cleaning list with Gemini...")
+def curate_places(state: dict) -> dict:
+    print("🧠 Curating and cleaning list with dynamic Gemini math...")
     
-    if not state['raw_results']:
+    if not state.get('raw_results'):
         print("⚠️ No raw results to curate.")
         state['curated_places'] = []
         return state
 
-    # Limit data size to avoid token limits
-    raw_data_str = json.dumps(state['raw_results'][:10]) 
+    # --- NEW: 1. Fetch Trip Details for Dynamic Math ---
+    try:
+        trip_res = supabase.table("trips").select("*").eq("id", state['trip_id']).execute()
+        trip = trip_res.data[0]
+        
+        start_dt = datetime.strptime(trip['start_date'], '%Y-%m-%d')
+        end_dt = datetime.strptime(trip['end_date'], '%Y-%m-%d')
+        days_count = max(1, (end_dt - start_dt).days + 1)
+        total_budget = trip['budget_limit']
+        
+    except Exception as e:
+        print(f"⚠️ Error fetching trip dates, using defaults: {e}")
+        days_count = 1
+        total_budget = 15000
+        
+    # --- NEW: 2. Calculate the Constraints ---
+    # 10 places for the first day, + 3 for every additional day
+    target_places = 10 + (3 * (days_count - 1))
+    
+    # Max 2 restaurants per day
+    max_restaurants = 2 * days_count
+    
+    # Daily budget per person
+    daily_budget = int(total_budget / days_count)
+
+    print(f"📊 Trip Math: {days_count} Days | {target_places} Places Needed | Max {max_restaurants} Restaurants | ₹{daily_budget}/day")
+
+    # --- 3. The Dynamic Prompt ---
+    raw_data_str = json.dumps(state['raw_results'][:30]) # Pass more raw data so it has options
     
     prompt = f"""
     You are an expert Travel Scout. I will give you a list of raw search results for a trip to {state['location']}.
     
-    Your Goal: Create a clean list of 10 unique, high-quality places.
+    TRIP CONSTRAINTS:
+    - Trip Duration: {days_count} days
+    - Daily Budget per person: ₹{daily_budget} INR
     
-    Rules:
+    YOUR GOAL: 
+    Create a clean, highly curated list of EXACTLY {target_places} unique, high-quality places for the group to vote on.
+    
+    STRICT RULES:
     1. Remove duplicates.
     2. Categorize them exactly as: 'Attraction', 'Restaurant', 'Activity', or 'Relaxation'.
-    3. Estimate cost (0 = Free, 1 = Cheap, 2 = Expensive, 3 = Luxury).
-    4. Provide a short, exciting description (1 sentence).
-    5. RATING: If the raw data does not include a star rating, use your internal knowledge to estimate its real-world Google Maps rating (e.g., 4.4, 4.7). Do not use 0.
-    6. Return ONLY valid JSON. Do not write markdown.
+    3. RESTAURANT LIMIT: You MUST NOT include more than {max_restaurants} places categorized as 'Restaurant'. 
+    4. BUDGET MATCH: Ensure the places fit within the ₹{daily_budget} daily budget. Give preference to free/cheap activities if the budget is low.
+    5. Cost Estimation: 0 = Free, 1 = Cheap, 2 = Expensive, 3 = Luxury.
+    6. Provide a short, exciting description (1 sentence).
+    7. Return ONLY valid JSON. Do not write markdown.
     
     Raw Data:
     {raw_data_str}

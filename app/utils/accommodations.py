@@ -1,4 +1,3 @@
-# app/utils/accommodations.py
 import os
 import requests
 import time
@@ -25,7 +24,8 @@ def get_amadeus_token() -> str:
         print(f"❌ Amadeus Authentication Failed: {e}")
         return ""
 
-def search_hotels(lat: float, lon: float, daily_budget: int) -> List[Dict]:
+# FIX: Added 'city: str = ""' to the function arguments right here!
+def search_hotels(lat: float, lon: float, daily_budget: int, city: str = "") -> List[Dict]:
     """
     Uses Amadeus API to find real hotels near the coordinates.
     Filters out options that exceed the daily budget.
@@ -66,18 +66,14 @@ def search_hotels(lat: float, lon: float, daily_budget: int) -> List[Dict]:
         except Exception as e:
             print(f"❌ Amadeus Search Error: {e}")
 
-    # --- FALLBACK LOGIC ---
-    # If Amadeus test environment lacks data for this city, we generate deterministic realistic options
-    # --- FALLBACK LOGIC ---
+    # --- UI GRACEFUL FALLBACK ---
+    # If no hotels were found (either due to API failure or budget being too low), 
+    # we return a clean warning object for the UI to display using the 'city' variable.
     if not options:
-        print("⚠️ No Amadeus data found. Falling back to realistic deterministic estimates.")
+        options.append({
+            "name": f"🚫 Cannot find places matching your budget near {city}",
+            "type": "Budget too low / No Data",
+            "price": daily_budget
+        })
         
-        # Adjusted for INR pricing
-        if daily_budget >= 8000:
-            options.append({"name": "Premium City Hotel", "price": daily_budget * 0.8, "type": "4-Star"})
-        elif daily_budget >= 3000:
-            options.append({"name": "Cozy Boutique Stay", "price": daily_budget * 0.75, "type": "3-Star"})
-            
-        options.append({"name": "Backpacker Hostel / Zostel", "price": 800.0, "type": "Hostel"})
-        
-    return options[:3]
+    return options[:3] # Return top 3 options

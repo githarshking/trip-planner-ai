@@ -8,7 +8,7 @@ from langchain_core.messages import HumanMessage
 from supabase import create_client
 from dotenv import load_dotenv
 
-from utils.routing import optimize_daily_route
+from utils.routing import optimize_daily_route, fetch_coordinates
 from utils.accommodations import search_hotels
 from utils.maps import generate_google_maps_url 
 from utils.transport import get_transit_instruction
@@ -74,28 +74,51 @@ def generate_itinerary(trip_id: str):
                 "id": place['id']
             })
             
-    # Sort by score initially to drop the lowest ones
+   # Sort by score initially to drop the lowest ones
     scored_places.sort(key=lambda x: x['score'], reverse=True)
-    top_places = scored_places[:6]
+    
+    # --- FIX: Move the Date Math UP to dynamically pick places ---
+    start_dt = datetime.strptime(trip['start_date'], '%Y-%m-%d')
+    end_dt = datetime.strptime(trip['end_date'], '%Y-%m-%d')
+    days_count = max(1, (end_dt - start_dt).days + 1)
+    
+    # Grab 3 to 4 real places per day so the LLM doesn't have to hallucinate fillers!
+    num_places_to_route = days_count * 3
+    top_places = scored_places[:num_places_to_route]
     
     # --- Step 2.5: The Math & Logistics Engine ---
-    print("🗺️ Running the OSRM Routing Engine...")
+    print(f"🗺️ Running the OSRM Routing Engine for Top {len(top_places)} places...")
     place_names = [p['name'] for p in top_places]
 
     # Our updated routing function now returns a list of dictionaries with distances
     optimized_route_data = optimize_daily_route(place_names, trip['destination'])
 
     print("🏨 Running Accommodation Engine...")
+    
     # Calculate how many days the trip is to find the daily budget
     start_dt = datetime.strptime(trip['start_date'], '%Y-%m-%d')
     end_dt = datetime.strptime(trip['end_date'], '%Y-%m-%d')
     days_count = max(1, (end_dt - start_dt).days + 1)
     
-    # Allocate the per-person budget purely to daily hotel costs for this test
     daily_budget = int(trip['budget_limit'] / days_count)
     
-    # We pass 0.0 for lat/lon so our Amadeus fallback logic naturally triggers for Indian cities
-    hotel_options = search_hotels(lat=0.0, lon=0.0, daily_budget=daily_budget)
+    # --- FIX: Fetch real coordinates for the destination ---
+    print(f"🌍 Finding exact map coordinates for {trip['destination']} hotels...")
+    city_data = fetch_coordinates([trip['destination']], trip['destination'])
+    
+    if city_data:
+        dest_lat = city_data[0]['lat']
+        dest_lon = city_data[0]['lon']
+    else:
+        print("⚠️ Could not find exact city coordinates, defaulting to fallback.")
+        dest_lat = 0.0
+        dest_lon = 0.0
+    
+
+    # Pass the REAL coordinates to Amadeus
+    hotel_options = search_hotels(lat=dest_lat, lon=dest_lon, daily_budget=daily_budget, city=trip['destination'])
+
+    hotel_prompt_text = json.dumps([h['name'] for h in hotel_options])
 
     # --- NEW: Generate Transit Instructions ---
     transit_log = []
@@ -120,7 +143,7 @@ def generate_itinerary(trip_id: str):
     Constraints:
     - Trip Duration: {trip['start_date']} to {trip['end_date']}.
     - Budget Level: {trip['budget_limit']} INR.
-    - Top Hotel Options: {json.dumps([h['name'] for h in hotel_options])}
+    - Top Hotel Options: {hotel_prompt_text}
 
     CRITICAL SEQUENCE & TRANSIT INSTRUCTIONS:
     You MUST schedule the places in EXACTLY this sequence to prevent zigzagging:
