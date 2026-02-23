@@ -14,3 +14,5 @@ print("\n" + "="*40 + "\n")
 
 # Run the Engine
 perfect_order = optimize_daily_route(scrambled_places, "Bangalore")
+print("Optimized Route:")
+print(perfect_order)

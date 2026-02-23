@@ -39,7 +39,8 @@ def fetch_coordinates(place_names: list[str], city: str) -> list[dict]:
                 results.append({
                     "name": name,
                     "lat": location.latitude,
-                    "lon": location.longitude
+                    "lon": location.longitude,
+                    "index": len(results)
                 })
             else:
                 print(f"⚠️ Warning: Completely failed to find coordinates for '{name}'.")
@@ -125,29 +126,41 @@ def solve_tsp(places: List[Dict], distance_matrix: List[List[float]], start_inde
                     break
             
     return optimized_route
-def optimize_daily_route(place_names: List[str], city: str) -> List[str]:
+def optimize_daily_route(place_names: List[str], city: str) -> List[Dict]:
     """
-    MASTER FUNCTION: The only function the AI Architect needs to call.
+    MASTER FUNCTION. 
+    Returns the sorted places AND the distance to the next stop.
     """
     print(f"🗺️ Starting Route Optimization for {city}...")
     
-    # 1. Get Lat/Lon
     coords = fetch_coordinates(place_names, city)
     if len(coords) < 2:
-        print("⏭️ Not enough valid coordinates to optimize. Skipping math.")
-        return place_names
+        return [{"name": name, "distance_to_next": 0} for name in place_names]
         
-    # 2. Get Distance Grid
     matrix = get_osrm_matrix(coords)
     if not matrix:
-        print("⏭️ Distance matrix failed. Skipping math.")
-        return [c['name'] for c in coords]
+        return [{"name": c['name'], "distance_to_next": 0} for c in coords]
         
-    # 3. Sort the Route
     sorted_coords = solve_tsp(coords, matrix)
     
-    # 4. Return just the names in the new, perfect order
-    sorted_names = [place['name'] for place in sorted_coords]
+    # --- NEW: Extract distances between the sorted stops ---
+    route_details = []
+    for i in range(len(sorted_coords)):
+        current_place = sorted_coords[i]
+        distance = 0.0
+        
+        # If it's not the last stop, get the distance to the next stop
+        if i < len(sorted_coords) - 1:
+            next_place = sorted_coords[i+1]
+            # Lookup the exact distance in the OSRM grid
+            dist_value = matrix[current_place['index']][next_place['index']]
+            if dist_value is not None:
+                distance = float(dist_value)
+                
+        route_details.append({
+            "name": current_place['name'],
+            "distance_to_next": distance # in meters
+        })
     
-    print(f"✅ Route Optimized: {' ➔ '.join(sorted_names)}")
-    return sorted_names
+    print(f"✅ Route Optimized: {' ➔ '.join([r['name'] for r in route_details])}")
+    return route_details
