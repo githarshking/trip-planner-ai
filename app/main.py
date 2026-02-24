@@ -8,6 +8,9 @@ import urllib.parse
 import json
 import os
 
+# --- PAGE CONFIG MUST BE THE FIRST STREAMLIT COMMAND ---
+st.set_page_config(page_title="AI Group Trip Planner", page_icon="✈️", layout="centered")
+
 # Import your modules
 from database.connection import get_db
 from agents.scout import run_scout_agent
@@ -26,7 +29,7 @@ def is_valid_uuid(val: str) -> bool:
         return False
 
 # --- DYNAMIC HYPE GENERATOR ---
-@st.cache_data(ttl=3600) # Cache this so it doesn't run every time someone clicks a button
+@st.cache_data(ttl=3600) 
 def get_destination_hype(destination):
     """Uses AI to generate a glorifying description and top experiences for the destination."""
     fallback_data = {
@@ -68,10 +71,6 @@ def get_destination_hype(destination):
         print(f"Hype Engine Error: {e}")
         return fallback_data
 
-
-# --- PAGE CONFIG ---
-st.set_page_config(page_title="AI Group Trip Planner", page_icon="✈️", layout="centered")
-
 # --- CSS FOR STYLING ---
 st.markdown("""
     <style>
@@ -79,13 +78,14 @@ st.markdown("""
     .block-container {
         max-width: 1000px !important;
     }
+    
+    /* Standard button styling */
     .stButton>button {
-        width: 100%;
-        background-color: #FF4B4B;
-        color: white;
         border-radius: 8px;
         font-weight: bold;
     }
+    
+    /* Hype text styling */
     .hype-text {
         font-size: 1.25rem;
         font-style: italic;
@@ -99,9 +99,29 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# --- SIDEBAR NAVIGATION ---
+# --- BIG RECTANGULAR NAVIGATION BUTTONS ---
+# Initialize session state for tracking the current page
+if "current_page" not in st.session_state:
+    st.session_state.current_page = "Create New Trip"
+
 st.sidebar.title("✈️ Navigation")
-page = st.sidebar.radio("Go to", ["Create New Trip", "Vote on Trip", "View Final Plan"])
+st.sidebar.markdown("Select a page below:")
+
+# Creating 3 giant, full-width buttons. The active one turns red (primary).
+if st.sidebar.button("🌍 Create New Trip", type="primary" if st.session_state.current_page == "Create New Trip" else "secondary", use_container_width=True):
+    st.session_state.current_page = "Create New Trip"
+    st.rerun()
+
+if st.sidebar.button("🗳️ Vote on Trip", type="primary" if st.session_state.current_page == "Vote on Trip" else "secondary", use_container_width=True):
+    st.session_state.current_page = "Vote on Trip"
+    st.rerun()
+
+if st.sidebar.button("📅 View Final Plan", type="primary" if st.session_state.current_page == "View Final Plan" else "secondary", use_container_width=True):
+    st.session_state.current_page = "View Final Plan"
+    st.rerun()
+
+# Set the page variable so the rest of the script knows what to render
+page = st.session_state.current_page
 
 # ==========================================
 # PAGE 1: CREATE TRIP (LEADER VIEW)
@@ -115,7 +135,7 @@ if page == "Create New Trip":
         st.code(st.session_state["created_trip_id"], language="text")
         st.markdown("They will need this ID to vote on the next tab.")
         
-        if st.button("Plan a Different Trip"):
+        if st.button("Plan a Different Trip", type="primary"):
             del st.session_state["created_trip_id"]
             st.rerun()
             
@@ -130,7 +150,7 @@ if page == "Create New Trip":
                 end_date = st.date_input("End Date", date.today())
             
             budget = st.number_input("Budget per person (INR ₹)", min_value=1000, value=15000, step=1000)
-            submitted = st.form_submit_button("🚀 Launch AI Scout")
+            submitted = st.form_submit_button("🚀 Launch AI Scout", type="primary")
 
         if submitted:
             with st.spinner(f"🤖 AI is scouting top places in {destination}..."):
@@ -169,7 +189,7 @@ elif page == "Vote on Trip":
         trip_id_input = st.text_input("Paste the Trip ID here:").strip()
         member_name = st.text_input("Your Name:").strip()
         
-        if st.button("Enter Voting Booth"):
+        if st.button("Enter Voting Booth", type="primary"):
             if not trip_id_input or not member_name:
                 st.warning("Please enter both a Trip ID and your name.")
             elif not is_valid_uuid(trip_id_input):
@@ -274,7 +294,7 @@ elif page == "Vote on Trip":
                     vibe = st.select_slider("Select your travel style", options=["Extremely Chill", "Balanced", "Non-stop Adventure"])
                     comment = st.text_area("Any specific requests? (e.g., 'No seafood', 'I want to hike')")
 
-                    if st.form_submit_button("Submit My Votes"):
+                    if st.form_submit_button("Submit My Votes", type="primary"):
                         vote_inserts = []
                         for pid in selected_places:
                             vote_inserts.append({
@@ -303,7 +323,7 @@ elif page == "View Final Plan":
     
     trip_id_input = st.text_input("Enter Trip ID to see the plan:").strip()
     
-    if st.button("Generate / View Plan"):
+    if st.button("Generate / View Plan", type="primary"):
         if not trip_id_input:
             st.warning("Please enter a Trip ID.")
         elif not is_valid_uuid(trip_id_input):
@@ -324,9 +344,9 @@ elif page == "View Final Plan":
                 else:
                     st.success("✨ Itinerary Generated!")
                     st.balloons()  # 🎈 Celebrate the final itinerary!
-                    time.sleep(1.5)
+                    time.sleep(1.5)  # ⏱️ Pause to let the animation play
                     
-                    # --- FIX: DYNAMIC HOTEL COLUMNS ---
+                    # --- DYNAMIC HOTEL COLUMNS ---
                     st.markdown("### 🏨 Your Accommodation Options")
                     st.caption("We crunched your daily budget. Here are the best places to stay:")
                     
